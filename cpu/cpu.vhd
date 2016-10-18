@@ -2,6 +2,7 @@ library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
 
+use work.common_pkg.all;
 use work.arith_pkg.all;
 
 entity cpu is
@@ -17,6 +18,10 @@ entity cpu is
 end entity cpu;
 
 architecture behavioral of cpu is
+
+    signal instType_s : instruction_type;
+    signal destType_s  : destination_type;
+    signal srcType_s   : source_type;
 
     ------------------------------
     -- 16 bit register definitions
@@ -40,11 +45,13 @@ architecture behavioral of cpu is
     -- This stores all the registers.
     signal regbank_r    : regbank_type(0 to 7);
 
-    -- This selects the destination register.
-    signal regDest_s    : std_logic_vector(2 downto 0);
+    -- This holds data of the currently selected source register for reading.
+    signal regReadData_s : std_logic_vector(7 downto 0);
 
-    -- Write enable to the destination register.
-    signal regWe_s      : std_logic;
+    -- This selects the destination register (when destType_s = DEST_REGISTER).
+    signal regDest_s    : std_logic_vector(2 downto 0);
+    -- This selects the destination register (when srcType_s = SRC_REGISTER).
+    signal regSrc_s    : std_logic_vector(2 downto 0);
 
     -- The result of the current calculation, will be written to the
     -- destination bus.
@@ -105,22 +112,32 @@ begin
 
     -- The decoder instance. This component takes our opcode, decodes it and
     -- generates signals related to fetching more words.
-    -- At the moment it says only if we require an additional immediate value
-    -- and if the instruction is finished or not.
+    -- It generates a signal if we require an additional immediate value
+    -- and if the opcode is complete or not.
+    -- When the opcode is reported as completed, the type, source and
+    -- destination signals can be used to execute the instruction.
     decoder_inst: entity work.decoder
         port map (
             clock_i       => clock_i,
             reset_i       => reset_i,
 
+            -- The opcode we're decoding
             opcode_i      => opcode_s,
 
-            regDest_o     => regDest_s,
-            regWe_o       => regWe_s,
+            -- When ready_o is high, this indicates the kind of instruction
+            instType_o    => instType_s,
+            srcType_o     => srcType_s,
+            destType_o    => destType_s,
 
+            -- The source and destination register indexes
+            regDest_o     => regDest_s,
+            regSrc_o      => regSrc_s,
+
+            -- Inform the decoder that the opcode or immediate fields are read
+            -- succesfully.
             opReady_i     => ctrlDecodeOp_s,
             immReady_i    => ctrlDecodeOpImm_s,
 
-            requiresImm_o => requireImm_s,
             ready_o       => ctrlExecute_s
         );
 
@@ -132,11 +149,16 @@ begin
     -- Writing is not done yet.
     memoryWriteEnable_o <= '0';
 
+    -- Read the selected register.
+    regReadData_s <= regbank_r(to_integer(unsigned(regSrc_s)));
+
     -- The result of our current operation, which will be written back.
-    result_s <= opcodeImm_s when requireImm_s = '1' else (others => '0');
+    result_s <= opcodeImm_s   when srcType_s = SRC_IMMEDIATE
+           else regReadData_s when srcType_s = SRC_REGISTER 
+           else (others => '0');
 
     -- Bypass the opcode register when it is being decoded.
-    opcode_s     <= memoryReadData_i when ctrlDecodeOp_s = '1'     else opcode_r;
+    opcode_s    <= memoryReadData_i when ctrlDecodeOp_s = '1'    else opcode_r;
     opcodeImm_s <= memoryReadData_i when ctrlDecodeOpImm_s = '1' else opcodeImm_r;
 
     -- The general clocked process, does state transitions and program counter
@@ -158,7 +180,7 @@ begin
         if reset_i = '1' then
             regbank_r <= (others => (others => '0'));
         elsif rising_edge(clock_i) then
-            if ctrlExecute_s = '1' and regWe_s = '1' then
+            if ctrlExecute_s = '1' and destType_s = DEST_REGISTER then
                 regbank_r(to_integer(unsigned(regDest_s))) <= result_s;
             end if;
         end if;
@@ -168,7 +190,7 @@ begin
     -- This produces the real control signals and calculates the next state,
     -- depending on the current state and if require an additional intermediate
     -- or not.
-    state_comb_proc: process (state_r, requireImm_s)
+    state_comb_proc: process (state_r, srcType_s)
     begin
         stateNext_r <= state_r;
         ctrlFetchOp_s     <= '0';
@@ -193,7 +215,7 @@ begin
                 ctrlDecodeOp_s <= '1';
 
                 -- Check if the decoder requires an additional intermediate.
-                if requireImm_s = '1' then
+                if srcType_s = SRC_IMMEDIATE then
                     -- Issue a fetch and increment of the program counter.
                     ctrlFetchOpImm_s <= '1';
                     ctrlIncPc_s <= '1';

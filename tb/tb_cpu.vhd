@@ -35,23 +35,26 @@ begin
     mem_inst: entity work.memory
     generic map (
         MEM_INIT => (
-            -- Test a few immideate loads
-            0 => x"3E", -- ld a, 0x42
+            -- Test a few immediate loads
+            0 => x"3E", -- ld A, 0x42
             1 => x"42", -- 0x42
 
-            2 => x"06", -- ld b, 0xba
+            2 => x"06", -- ld B, 0xba
             3 => x"BA", -- 0x42
 
-            4 => x"0E", -- ld c, 0xbe
+            4 => x"0E", -- ld C, 0xbe
             5 => x"BE", -- 0x42
 
+            6 => x"50", -- ld D, B
+            7 => x"59", -- ld E, C
+
             -- Test a memory load with immediate address
-            6 => x"FA", -- ld a, (0x24)
-            7 => x"24", -- 0x24
+--            6 => x"FA", -- ld a, (0x24)
+--            7 => x"24", -- 0x24
 
             -- Test a memory load with a pointer address
-            8 => x"7E", -- ld a, (hl)
-            9 => x"78", -- ld a, b
+--            8 => x"7E", -- ld a, (hl)
+--            9 => x"78", -- ld a, b
 
             others => (others => '0')
         )

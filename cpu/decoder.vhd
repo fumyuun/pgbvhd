@@ -2,6 +2,8 @@ library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
 
+use work.common_pkg.all;
+
 entity decoder is
 	port (
         clock_i       : in std_logic;
@@ -10,37 +12,38 @@ entity decoder is
         opcode_i      : in std_logic_vector(7 downto 0);
 
         regDest_o     : out std_logic_vector(2 downto 0);
-        regWe_o       : out std_logic;
+        regSrc_o      : out std_logic_vector(2 downto 0);
+
+        instType_o    : out instruction_type;
+        destType_o    : out destination_type;
+        srcType_o     : out source_type;
 
         opReady_i     : in std_logic;
         immReady_i    : in std_logic;
 
-        requiresImm_o : out std_logic;
         ready_o       : out std_logic
     );
 end entity decoder;
 
 architecture behavioral of decoder is
-	signal requiresImm_s : std_logic;
+    signal srcType_s : source_type;
 begin
 
-	requiresImm_o <= requiresImm_s;
+	srcType_o <= srcType_s;
 
-    -- mnem    opc  bits
-    --              00xx x110
-    -- LD B, n 0x06 0000 0110
-    -- LD C, n 0x0E 0000 1110
-    -- LD D, n 0x16 0001 0110
-    -- LD E, n 0x1E 0001 1110
-    -- LD H, n 0x26 0010 0110
-    -- LD L, n 0x2E 0010 1110
-    -- LD A, n 0x3E 0011 1110
-    requiresImm_s <= '1' when ((opcode_i and "11000111") = "00000110") else '0';
-    regWe_o        <= requiresImm_s;
+    -- mnem         bits
+    -- LD r8, n     00dd d110  nnnn nnnn
+    -- LD r8, r8    01dd dsss
+
+
+    instType_o    <= INST_MOVE;
+    destType_o    <= DEST_REGISTER;
+    srcType_s     <= SRC_IMMEDIATE when ((opcode_i and "11000111") = "00000110") else SRC_REGISTER;
 
     regDest_o <= opcode_i(5 downto 3);
+    regSrc_o  <= opcode_i(2 downto 0);
 
-    ready_o <= '1' when (opReady_i = '1' and requiresImm_s = '0') or immReady_i = '1'
+    ready_o <= '1' when (opReady_i = '1' and srcType_s = SRC_REGISTER) or (immReady_i = '1' and srcType_s = SRC_IMMEDIATE)
           else '0';
 
 end architecture behavioral;
