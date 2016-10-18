@@ -2,6 +2,8 @@ library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
 
+use work.arith_pkg.all;
+
 entity cpu is
     port (
         clock_i : in std_logic;
@@ -101,6 +103,10 @@ architecture behavioral of cpu is
 
 begin
 
+    -- The decoder instance. This component takes our opcode, decodes it and
+    -- generates signals related to fetching more words.
+    -- At the moment it says only if we require an additional immediate value
+    -- and if the instruction is finished or not.
     decoder_inst: entity work.decoder
         port map (
             clock_i       => clock_i,
@@ -118,26 +124,35 @@ begin
             ready_o       => ctrlExecute_s
         );
 
+    -- The requested memory address. For now only the program counter is used
+    -- when we fetch an opcode or an immediate.
     memoryAddress_o <= pc_r when ctrlFetchOp_s = '1' or ctrlFetchOpImm_s = '1'
                    else (others => 'Z');
 
+    -- Writing is not done yet.
     memoryWriteEnable_o <= '0';
 
+    -- The result of our current operation, which will be written back.
     result_s <= opcodeImm_s when requireImm_s = '1' else (others => '0');
 
     -- Bypass the opcode register when it is being decoded.
     opcode_s     <= memoryReadData_i when ctrlDecodeOp_s = '1'     else opcode_r;
     opcodeImm_s <= memoryReadData_i when ctrlDecodeOpImm_s = '1' else opcodeImm_r;
 
-    pc_reg_proc: process (reset_i, clock_i)
+    -- The general clocked process, does state transitions and program counter
+    -- incrementing.
+    clock_proc: process (reset_i, clock_i)
     begin
         if reset_i = '1' then
+            state_r <= STATE_FETCH;
             pc_r <= (others => '0');
         elsif rising_edge(clock_i) then
             pc_r <= pcNext_r;
+            state_r <= stateNext_r;
         end if;
     end process;
 
+    -- The register bank clocked process.
     reg_proc: process (reset_i, clock_i)
     begin
         if reset_i = '1' then
@@ -149,34 +164,37 @@ begin
         end if;
     end process;
 
-    state_reg_proc: process (reset_i, clock_i)
-    begin
-        if reset_i = '1' then
-            state_r <= STATE_FETCH;
-        elsif rising_edge(clock_i) then
-            state_r <= stateNext_r;
-        end if;
-    end process;
-
+    -- The combinatorial state machine process.
+    -- This produces the real control signals and calculates the next state,
+    -- depending on the current state and if require an additional intermediate
+    -- or not.
     state_comb_proc: process (state_r, requireImm_s)
     begin
         stateNext_r <= state_r;
-        ctrlFetchOp_s      <= '0';
+        ctrlFetchOp_s     <= '0';
         ctrlFetchOpImm_s  <= '0';
-        ctrlDecodeOp_s     <= '0';
+        ctrlDecodeOp_s    <= '0';
         ctrlDecodeOpImm_s <= '0';
-        ctrlIncPc_s        <= '0';
+        ctrlIncPc_s       <= '0';
 
         case state_r is
+            -- The first stage fetches the opcode and increments the program
+            -- counter.
             when STATE_FETCH  =>
                 ctrlFetchOp_s <= '1';
-                ctrlIncPc_s    <= '1';
-                stateNext_r <= STATE_DECODE;
+                ctrlIncPc_s   <= '1';
+                stateNext_r   <= STATE_DECODE;
 
-            when STATE_DECODE => 
+            -- In the second state, the opcode is available and can be decoded.
+            -- The decoder starts and notifies us if we require to fetch an
+            -- additional byte.
+            when STATE_DECODE =>
+                -- Inform the decoder that the instruction is available.
                 ctrlDecodeOp_s <= '1';
 
+                -- Check if the decoder requires an additional intermediate.
                 if requireImm_s = '1' then
+                    -- Issue a fetch and increment of the program counter.
                     ctrlFetchOpImm_s <= '1';
                     ctrlIncPc_s <= '1';
                     stateNext_r <= STATE_DECODE_IMM;
@@ -184,6 +202,7 @@ begin
                     stateNext_r <= STATE_FETCH;
                 end if;
             when STATE_DECODE_IMM =>
+                -- Inform the decoder that the intermediate is available.
                 ctrlDecodeOpImm_s <= '1';
 
                 stateNext_r <= STATE_FETCH;
@@ -191,6 +210,8 @@ begin
         end case;
     end process;
 
+    -- This process stores the opcode or immediate values in their respective
+    -- registers.
     opcode_reg_proc_s: process (reset_i, clock_i)
     begin
         if reset_i = '1' then
@@ -205,11 +226,12 @@ begin
         end if;
     end process;
 
+    -- Calculate the next program counter.
     pc_next_proc: process (ctrlIncPc_s, pc_r)
     begin
         pcNext_r <= pc_r;
         if ctrlIncPc_s = '1' then
-            pcNext_r <= std_logic_vector(to_unsigned(to_integer(unsigned(pc_r) + 1), pcNext_r'length));
+            pcNext_r <= increment(pc_r);
         end if;
     end process;
 
